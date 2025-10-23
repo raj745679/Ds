@@ -913,41 +913,27 @@ Usage: `/setngrok YOUR_NGROK_AUTH_TOKEN`
 """)
         return
     
-    # Token validation
-    if not text.startswith('2') or len(text) < 20:
-        await update.message.reply_text("❌ **Invalid Ngrok Token Format**\nToken should start with '2' and be longer")
+    # SIMPLIFIED VALIDATION - Accept any token longer than 10 characters
+    if len(text) < 10:
+        await update.message.reply_text("❌ **Token seems too short**")
         return
     
-    # Validate token before saving
-    await update.message.reply_text("🔍 **Validating Ngrok Token...**")
+    # Save token directly without strict validation
+    save_ngrok_token(user_id, text)
+    clean_ngrok_tokens()
     
-    if validate_ngrok_token(text):
-        save_ngrok_token(user_id, text)
-        clean_ngrok_tokens()
-        
-        # Count user's tokens
-        user_tokens = get_user_ngrok_tokens(user_id)
-        
-        await update.message.reply_text(f"""
+    # Count user's tokens
+    user_tokens = get_user_ngrok_tokens(user_id)
+    
+    await update.message.reply_text(f"""
 ✅ **NGROK TOKEN SAVED SUCCESSFULLY!**
 
-🔑 Token: `{text[:12]}...`
+🔑 Token: `{text[:15]}...`
 👤 Your Tokens: {len(user_tokens)}
-📊 Status: ✅ Validated
+📊 Status: ✅ Saved
 
-🌐 **Now you can create tunnels with /attack command**
-""")
-    else:
-        await update.message.reply_text("""
-❌ **INVALID NGROK TOKEN**
-
-🔹 **Check:**
-• Token is correct
-• Token is active at ngrok.com
-• No extra spaces
-• Network connection
-
-🔗 **Get new token:** https://dashboard.ngrok.com/get-started/your-authtoken
+💡 **Note:** Token will be validated during attack
+Use `/check` to verify token status
 """)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
